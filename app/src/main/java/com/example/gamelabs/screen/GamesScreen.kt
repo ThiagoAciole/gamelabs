@@ -1,6 +1,7 @@
 package com.example.gamelabs.screen
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.util.Log
 import androidx.activity.compose.BackHandler
@@ -16,6 +17,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,6 +30,7 @@ import androidx.compose.ui.input.key.*
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.*
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -35,10 +38,10 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.*
 import coil.compose.AsyncImage
 import com.example.gamelabs.R
-import com.example.gamelabs.data.scanGamesFromFolder
+import com.example.gamelabs.data.saveGameCover
+import com.example.gamelabs.data.scanGames
 import com.example.gamelabs.model.Console
 import com.example.gamelabs.model.Game
-import com.example.gamelabs.util.FolderManager
 import com.example.gamelabs.util.isConfirmButton
 import com.example.gamelabs.util.isL1
 import com.example.gamelabs.util.isR1
@@ -46,7 +49,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,7 +61,31 @@ fun GamesScreen(
     val scope = rememberCoroutineScope()
     var games by remember { mutableStateOf<List<Game>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
-    var selectedGameTitle by remember { mutableStateOf("") } // Título no topo
+    var selectedGameTitle by remember { mutableStateOf("") }
+
+    // SharedPreferences para salvar o caminho customizado
+    val prefs = remember { context.getSharedPreferences("game_paths", Context.MODE_PRIVATE) }
+
+    // Launcher para escolher a pasta
+    val dirPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            // Persistir permissão de leitura para o futuro
+            try {
+                val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(uri, flags)
+            } catch (e: Exception) {
+                Log.e("GamesScreen", "Erro ao persistir permissão: ${e.message}")
+            }
+
+            // Salvar URI nas preferências
+            prefs.edit().putString(console.name, uri.toString()).apply()
+
+            // Forçar rescaneamento
+            isLoading = true
+        }
+    }
 
     BackHandler(onBack = onBack)
 
@@ -67,12 +93,16 @@ fun GamesScreen(
         scope.launch(Dispatchers.IO) {
             isLoading = true
             try {
-                // Agora o scan usa o FolderManager internamente, passamos apenas o context e console
-                val result = scanGamesFromFolder(context, console)
+                // Scan usando a função unificada
+                val result = scanGames(context, console)
+
                 withContext(Dispatchers.Main) {
                     games = result
                     isLoading = false
-                    if (games.isNotEmpty()) selectedGameTitle = games[0].name
+                    if (games.isNotEmpty() && selectedGameTitle.isEmpty()) {
+                        selectedGameTitle = games[0].name
+                    }
+                    if (games.isEmpty()) selectedGameTitle = ""
                 }
             } catch (e: Exception) {
                 Log.e("GamesScreen", "Erro no scan: ${e.message}")
@@ -81,24 +111,59 @@ fun GamesScreen(
         }
     }
 
-    LaunchedEffect(console) { performScan() }
+    LaunchedEffect(console, isLoading) {
+        if(isLoading) performScan()
+    }
 
     Scaffold(
         containerColor = Color.Black,
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(console.displayName, color = Color.White, fontSize = 18.sp) },
+                modifier = Modifier.height(60.dp),
+                title = {
+                    Text(
+                        text = console.displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontSize = 18.sp
+                    )
+                },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Voltar", tint = Color.White)
+                    IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.voltar_description)
+                        )
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Black)
+                actions = {
+                    IconButton(
+                        onClick = { dirPickerLauncher.launch(null) },
+                        modifier = Modifier.size(60.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Selecionar Pasta de Jogos",
+                            tint = Color.White
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Black,
+                    titleContentColor = Color.White,
+                    navigationIconContentColor = Color.White,
+                    actionIconContentColor = Color.White
+                )
             )
         },
         bottomBar = { BottomActionsBar(onBack = onBack) }
     ) { padding ->
-        Box(modifier = Modifier.padding(padding).fillMaxSize()) {
+        Box(modifier = Modifier
+            .fillMaxSize()
+            .padding(
+                top = padding.calculateTopPadding(),
+                bottom = padding.calculateBottomPadding()
+            )
+        ) {
             if (isLoading) {
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = Color(0xFF7C4DFF))
             } else {
@@ -109,7 +174,7 @@ fun GamesScreen(
                     onPlayGame = onPlayGame,
                     onRescan = { performScan() },
                     onBack = onBack,
-                    consoleName = console.name
+                    console = console // <--- CORREÇÃO 1: Passando o objeto Console
                 )
             }
         }
@@ -124,7 +189,7 @@ fun GamesScreenContent(
     onPlayGame: (Game) -> Unit,
     onRescan: () -> Unit,
     onBack: () -> Unit,
-    consoleName: String
+    console: Console // <--- CORREÇÃO 2: Recebendo Console em vez de String
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -137,8 +202,15 @@ fun GamesScreenContent(
     ) { uri: Uri? ->
         if (uri != null && gameBeingEdited != null) {
             scope.launch(Dispatchers.IO) {
-                val rootFile = FolderManager.getConsoleRootDir(consoleName)
-                if (saveCoverToFile(context, gameBeingEdited!!, uri, rootFile)) {
+                // Agora 'console' existe aqui corretamente
+                val success = saveGameCover(
+                    context,
+                    console,
+                    gameBeingEdited!!,
+                    uri
+                )
+
+                if (success) {
                     withContext(Dispatchers.Main) { onRescan() }
                 }
             }
@@ -160,44 +232,46 @@ fun GamesScreenContent(
                     keyEvent.isL1() -> {
                         focusManager.moveFocus(FocusDirection.Left); true
                     }
-
                     keyEvent.isR1() -> {
                         focusManager.moveFocus(FocusDirection.Right); true
                     }
-                    // Botão B do controle para Voltar
                     keyEvent.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_BACK ||
                             keyEvent.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_BUTTON_B -> {
                         if (keyEvent.type == KeyEventType.KeyUp) onBack()
                         true
                     }
-
                     else -> false
                 }
             },
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Título do jogo selecionado (Exibindo em cima como solicitado)
         Text(
             text = selectedGameTitle,
             color = Color(0xFF7C4DFF),
             fontSize = 16.sp,
-            fontWeight = FontWeight.ExtraBold,
+            fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(1.dp),
+            modifier = Modifier.padding(2.dp),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
 
         if (games.isEmpty()) {
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                Text("Nenhum jogo encontrado em Games/$consoleName", color = Color.Gray)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Nenhum jogo encontrado.", color = Color.Gray)
+                    Spacer(Modifier.height(8.dp))
+                    Text("Toque em + no topo para selecionar uma pasta.", color = Color.DarkGray, fontSize = 12.sp)
+                }
             }
         } else {
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 40.dp),
                 horizontalArrangement = Arrangement.spacedBy(24.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
+                verticalAlignment = Alignment.Top,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(top = 30.dp)
             ) {
                 itemsIndexed(games) { index, game ->
                     GameCard(
@@ -254,7 +328,6 @@ private fun GameCard(
             },
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Capa com proporção de DVD
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -275,7 +348,6 @@ private fun GameCard(
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
-                // Fallback icon se não tiver capa ou for preview
                 Icon(
                     painter = painterResource(R.drawable.gamepad),
                     contentDescription = null,
@@ -289,7 +361,6 @@ private fun GameCard(
 
         Spacer(Modifier.height(4.dp))
 
-        // Nome embaixo do card
         Text(
             text = game.name,
             color = if (isFocused) Color.White else Color.Gray,
@@ -319,11 +390,9 @@ private fun BottomActionsBar(onBack: () -> Unit) {
 
 @Composable
 private fun ActionButton(key: String, label: String, onClick: () -> Unit = {}) {
-    // Fonte de interação para detectar o toque
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
-    // Animação da cor: Roxo se pressionado, Cinza se solto
     val backgroundColor by animateColorAsState(
         targetValue = if (isPressed) Color(0xFF7C4DFF) else Color.DarkGray,
         label = "ButtonColorAnimation"
@@ -344,7 +413,7 @@ private fun ActionButton(key: String, label: String, onClick: () -> Unit = {}) {
             Box(contentAlignment = Alignment.Center) {
                 Text(
                     text = key,
-                    color = if (isPressed) Color.White else Color.White,
+                    color = Color.White,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -359,26 +428,9 @@ private fun ActionButton(key: String, label: String, onClick: () -> Unit = {}) {
     }
 }
 
-private fun saveCoverToFile(
-    context: Context,
-    game: Game,
-    sourceUri: Uri,
-    rootFile: File
-): Boolean {
-    return try {
-        val coversFolder = File(rootFile, "Covers")
-        if (!coversFolder.exists()) coversFolder.mkdirs()
-        val targetFile = File(coversFolder, "${game.name}.jpg")
-        context.contentResolver.openInputStream(sourceUri)?.use { input ->
-            targetFile.outputStream().use { output -> input.copyTo(output) }
-        }
-        true
-    } catch (e: Exception) {
-        false
-    }
-}
-// ================= PREVIEW =================
+// Removi a função privada saveCoverToFile pois agora o GameScanner cuida disso
 
+// ================= PREVIEW =================
 @OptIn(ExperimentalMaterial3Api::class)
 @Preview(
     name = "Games Screen (Landscape)",
@@ -389,35 +441,40 @@ private fun saveCoverToFile(
 )
 @Composable
 private fun GamesScreenPreview() {
-    // Dados Mockados
     val mockGames = listOf(
         Game("Crash Bandicoot 3", Uri.EMPTY, null),
-        Game("Tekken 3", Uri.EMPTY, null),
-        Game("Gran Turismo 2", Uri.EMPTY, null),
-        Game("Silent Hill", Uri.EMPTY, null),
-        Game("Castlevania SOTN", Uri.EMPTY, null)
+        Game("Tekken 3", Uri.EMPTY, null)
     )
 
-    // Adicionamos o Scaffold AQUI na preview para simular a tela completa
     Scaffold(
         containerColor = Color.Black,
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("PlayStation 1", color = Color.White, fontSize = 18.sp) },
+                modifier = Modifier.height(60.dp),
+                title = { Text("PlayStation 1", style = MaterialTheme.typography.titleMedium) },
                 navigationIcon = {
-                    IconButton(onClick = {}) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Voltar", tint = Color.White)
+                    IconButton(onClick = {}, modifier = Modifier.size(48.dp)) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Voltar")
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Black)
+                actions = {
+                    IconButton(onClick = {}, modifier = Modifier.size(60.dp)) {
+                        Icon(Icons.Default.Add, "Add", tint = Color.White)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Black,
+                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary,
+                    actionIconContentColor = MaterialTheme.colorScheme.onPrimary
+                )
             )
         },
-        bottomBar = {
-            BottomActionsBar(onBack = {})
-        }
+        bottomBar = { BottomActionsBar(onBack = {}) }
     ) { padding ->
-        // O Box aplica o padding do Scaffold para o conteúdo não ficar embaixo das barras
-        Box(modifier = Modifier.padding(padding).fillMaxSize()) {
+        Box(modifier = Modifier
+            .padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding())
+            .fillMaxSize()) {
             GamesScreenContent(
                 games = mockGames,
                 selectedGameTitle = "Crash Bandicoot 3",
@@ -425,7 +482,7 @@ private fun GamesScreenPreview() {
                 onPlayGame = {},
                 onRescan = {},
                 onBack = {},
-                consoleName = "PS1"
+                console = Console.PS1 // <--- CORREÇÃO 3: Passando Console na Preview
             )
         }
     }
