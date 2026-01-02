@@ -36,6 +36,7 @@ import com.example.gamelabs.R
 import com.example.gamelabs.data.Ps1Bridge
 import com.example.gamelabs.model.Game
 import com.example.gamelabs.model.RetroInput
+import com.example.gamelabs.util.FolderManager
 import com.example.gamelabs.util.mapKeyCodeToRetroId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -57,7 +58,9 @@ fun Ps1EmulatorScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var inputState by remember { mutableIntStateOf(0) }
 
-    // Inicia true, mas será verificado no LaunchedEffect
+    // Variável para guardar o caminho do arquivo temporário da ROM
+    var tempGamePath by remember { mutableStateOf<String?>(null) }
+
     var showOverlay by remember { mutableStateOf(true) }
     val focusRequester = remember { FocusRequester() }
 
@@ -70,7 +73,7 @@ fun Ps1EmulatorScreen(
         onDispose { insetsController.show(WindowInsetsCompat.Type.systemBars()) }
     }
 
-    // --- RENDERER OPENGL (Usa Ps1Bridge) ---
+    // --- RENDERER OPENGL ---
     val renderer = remember {
         object : GLSurfaceView.Renderer {
             override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) { Ps1Bridge.initGL() }
@@ -88,23 +91,27 @@ fun Ps1EmulatorScreen(
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
 
-        // --- DETECÇÃO DE GAMEPAD ---
         val connectedControllerName = checkForGamepad()
         if (connectedControllerName != null) {
-            // Se achou controle, esconde o overlay automaticamente
             showOverlay = false
             Toast.makeText(context, "Conectado ao $connectedControllerName", Toast.LENGTH_LONG).show()
         }
 
         withContext(Dispatchers.IO) {
             try {
-                // Carrega diretamente o Core do PS1 (Sem if/else para outros consoles)
-                val corePath = Ps1Bridge.getCorePath(context)
+                // 1. Configurar pasta do Memory Card (Games/PS1/MemoryCards)
+                val savePath = FolderManager.getMemoryCardPath("PS1")
+                Ps1Bridge.setDirectories(savePath)
 
+                // 2. Carregar Core
+                val corePath = Ps1Bridge.getCorePath(context)
                 if (!Ps1Bridge.loadCore(corePath)) throw Exception("Falha ao carregar Core PS1")
 
-                val gamePath = copyGameToCache(context, game.uri, game.name) ?: throw Exception("Falha na ROM")
-                if (!Ps1Bridge.loadGame(gamePath)) throw Exception("Falha ao carregar Jogo")
+                // 3. Copiar Jogo para Cache
+                val path = copyGameToCache(context, game.uri, game.name) ?: throw Exception("Falha na ROM")
+                tempGamePath = path // Guarda referência para deletar depois
+
+                if (!Ps1Bridge.loadGame(path)) throw Exception("Falha ao carregar Jogo")
 
                 Ps1Bridge.setupAudio()
                 isRunning = true
@@ -116,15 +123,28 @@ fun Ps1EmulatorScreen(
         }
     }
 
+    // --- LIMPEZA AO SAIR ---
     DisposableEffect(Unit) {
         onDispose {
             isRunning = false
             Ps1Bridge.stopAudio()
             Ps1Bridge.closeCore()
+
+            // Deletar o arquivo temporário (ISO/BIN) para liberar espaço
+            tempGamePath?.let { path ->
+                try {
+                    val file = File(path)
+                    if (file.exists()) {
+                        file.delete()
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
         }
     }
 
-    // --- CONTAINER PRINCIPAL ---
+    // --- UI ---
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -154,7 +174,7 @@ fun Ps1EmulatorScreen(
             }
         } else if (isRunning) {
 
-            // 1. VÍDEO (OpenGL)
+            // 1. VÍDEO
             AndroidView(
                 factory = { ctx ->
                     GLSurfaceView(ctx).apply {
@@ -168,7 +188,7 @@ fun Ps1EmulatorScreen(
                 modifier = Modifier.fillMaxSize()
             )
 
-            // 2. OVERLAY (Ícones PNG)
+            // 2. OVERLAY
             if (showOverlay) {
                 EmulatorOverlay(
                     onInputChanged = { buttonId, pressed ->
@@ -178,7 +198,7 @@ fun Ps1EmulatorScreen(
                 )
             }
 
-            // 3. MENU SUPERIOR
+            // 3. MENU
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -188,7 +208,6 @@ fun Ps1EmulatorScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Toggle Gamepad
                 Image(
                     painter = painterResource(R.drawable.gamepad),
                     contentDescription = "Controles",
@@ -198,7 +217,6 @@ fun Ps1EmulatorScreen(
                         .clickable { showOverlay = !showOverlay }
                 )
 
-                // Fechar
                 Icon(
                     imageVector = Icons.Default.Close,
                     contentDescription = "Sair",
@@ -223,7 +241,7 @@ fun EmulatorOverlay(
         .fillMaxSize()
         .windowInsetsPadding(WindowInsets.safeDrawing)
     ) {
-        // --- GATILHOS SUPERIORES (L1/L2 e R1/R2) ---
+        // GATILHOS
         Row(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -244,7 +262,7 @@ fun EmulatorOverlay(
             }
         }
 
-        // --- D-PAD ---
+        // D-PAD
         Box(
             modifier = Modifier
                 .align(Alignment.BottomStart)
@@ -257,7 +275,7 @@ fun EmulatorOverlay(
             Box(Modifier.align(Alignment.CenterEnd)) { RetroImageButton(R.drawable.right, RetroInput.ID_RIGHT, onInputChanged, size = 42) }
         }
 
-        // --- BOTÕES DE AÇÃO ---
+        // AÇÃO
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -270,7 +288,7 @@ fun EmulatorOverlay(
             Box(Modifier.align(Alignment.CenterEnd)) { RetroImageButton(R.drawable.circle, RetroInput.ID_B, onInputChanged, size = 48) }
         }
 
-        // --- START / SELECT ---
+        // START/SELECT
         Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -314,10 +332,18 @@ fun RetroImageButton(
 private suspend fun copyGameToCache(context: android.content.Context, uri: android.net.Uri, name: String): String? {
     return withContext(Dispatchers.IO) {
         try {
+            // 1. Cria uma pasta dedicada para evitar misturar com cache de imagens
+            val cacheDir = File(context.cacheDir, "rom_cache")
+            if (!cacheDir.exists()) cacheDir.mkdirs()
+
             val inputStream = context.contentResolver.openInputStream(uri) ?: return@withContext null
             val fileName = if (name.contains(".")) name else "$name.bin"
-            val tempFile = File(context.cacheDir, fileName)
+
+            // 2. Salva DENTRO dessa pasta
+            val tempFile = File(cacheDir, fileName)
+
             if (tempFile.exists() && tempFile.length() > 0) return@withContext tempFile.absolutePath
+
             val outputStream = FileOutputStream(tempFile)
             inputStream.use { input -> outputStream.use { output -> input.copyTo(output) } }
             tempFile.absolutePath
@@ -325,15 +351,13 @@ private suspend fun copyGameToCache(context: android.content.Context, uri: andro
     }
 }
 
-// Helper para detectar Gamepad
 private fun checkForGamepad(): String? {
     val deviceIds = InputDevice.getDeviceIds()
     for (deviceId in deviceIds) {
         val device = InputDevice.getDevice(deviceId) ?: continue
         val sources = device.sources
-        val isGamepad = (sources and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD
-        val isJoystick = (sources and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
-        if (isGamepad || isJoystick) {
+        if ((sources and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD ||
+            (sources and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK) {
             return device.name
         }
     }

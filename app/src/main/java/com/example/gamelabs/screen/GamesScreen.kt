@@ -259,6 +259,13 @@ fun GamesScreenContent(
         if (games.isEmpty()) {
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Image(
+                        painter = painterResource(id = R.drawable.notfound),
+                        contentDescription = "Nenhum jogo encontrado",
+                        modifier = Modifier
+                            .size(200.dp),
+                        alpha = 0.7f
+                    )
                     Text("Nenhum jogo encontrado.", color = Color.Gray)
                     Spacer(Modifier.height(8.dp))
                     Text("Toque em + no topo para selecionar uma pasta.", color = Color.DarkGray, fontSize = 12.sp)
@@ -483,6 +490,60 @@ private fun GamesScreenPreview() {
                 onRescan = {},
                 onBack = {},
                 console = Console.PS1 // <--- CORREÇÃO 3: Passando Console na Preview
+            )
+        }
+    }
+}
+@OptIn(ExperimentalMaterial3Api::class)
+@Preview(
+    name = "Games Screen (Empty/Not Found)",
+    widthDp = 891,
+    heightDp = 411,
+    showBackground = true,
+    backgroundColor = 0xFF000000
+)
+@Composable
+private fun GamesScreenPreviewEmpty() {
+    // Não precisamos de mockGames aqui, pois queremos testar o estado vazio
+
+    Scaffold(
+        containerColor = Color.Black,
+        topBar = {
+            CenterAlignedTopAppBar(
+                modifier = Modifier.height(60.dp),
+                title = { Text("PlayStation 1", style = MaterialTheme.typography.titleMedium) },
+                navigationIcon = {
+                    IconButton(onClick = {}, modifier = Modifier.size(48.dp)) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Voltar")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = {}, modifier = Modifier.size(60.dp)) {
+                        Icon(Icons.Default.Add, "Add", tint = Color.White)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Black,
+                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary,
+                    actionIconContentColor = MaterialTheme.colorScheme.onPrimary
+                )
+            )
+        },
+        bottomBar = { BottomActionsBar(onBack = {}) }
+    ) { padding ->
+        Box(modifier = Modifier
+            .padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding())
+            .fillMaxSize()) {
+
+            GamesScreenContent(
+                games = emptyList(),
+                selectedGameTitle = "",
+                onSelectedGameChange = {},
+                onPlayGame = {},
+                onRescan = {},
+                onBack = {},
+                console = Console.PS1
             )
         }
     }

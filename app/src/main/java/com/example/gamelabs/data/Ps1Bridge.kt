@@ -7,13 +7,17 @@ import android.media.AudioTrack
 
 object Ps1Bridge {
     init {
-        // Carrega a biblioteca nativa que criamos no CMake (ps1-bridge)
+        // Carrega a biblioteca nativa compilada do C++
         System.loadLibrary("ps1-bridge")
     }
 
     private var audioTrack: AudioTrack? = null
 
-    // Funções Nativas (Vinculadas ao C++ ps1-bridge.cpp)
+    // --- Funções Nativas (Vinculadas ao C++) ---
+
+    // Configura o caminho para salvar Memory Card (.mcr)
+    external fun setDirectories(savePath: String)
+
     external fun loadCore(corePath: String): Boolean
     external fun loadGame(romPath: String): Boolean
     external fun runFrame()
@@ -23,7 +27,7 @@ object Ps1Bridge {
     external fun resizeGL(width: Int, height: Int)
     external fun drawFrameGL()
 
-    // Setup de Áudio específico para PS1 (44100Hz)
+    // --- Áudio ---
     fun setupAudio() {
         val sampleRate = 44100
         val bufferSize = AudioTrack.getMinBufferSize(
@@ -55,13 +59,16 @@ object Ps1Bridge {
     }
 
     fun stopAudio() {
-        audioTrack?.stop()
-        audioTrack?.release()
+        try {
+            audioTrack?.stop()
+            audioTrack?.release()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
         audioTrack = null
     }
 
     fun getCorePath(context: Context): String {
-        // Retorna sempre o core do PS1
         val libDir = context.applicationInfo.nativeLibraryDir
         return "$libDir/libpcsx_rearmed_libretro_android.so"
     }

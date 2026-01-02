@@ -11,6 +11,8 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 #define RETRO_DEVICE_JOYPAD 1
+#define RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY 9
+#define RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY 31
 
 // --- STRUCTS LIBRETRO ---
 struct retro_game_info {
@@ -23,6 +25,7 @@ struct retro_game_info {
 // --- GLOBAIS ---
 void* coreHandle = nullptr;
 uint16_t current_buttons = 0;
+std::string g_saveDirectory = ""; // Armazena o caminho do Memory Card
 
 // OpenGL
 GLuint g_textureId = 0;
@@ -50,7 +53,7 @@ void (*retro_set_audio_sample_batch)(size_t (*cb)(const int16_t *, size_t));
 void (*retro_set_input_poll)(void (*cb)(void));
 void (*retro_set_input_state)(int16_t (*cb)(unsigned, unsigned, unsigned, unsigned));
 
-// --- SHADERS (Mantidos iguais) ---
+// --- SHADERS ---
 const char* vertexShaderCode =
         "attribute vec4 a_Position;\n"
         "attribute vec2 a_TexCoordinate;\n"
@@ -77,12 +80,31 @@ GLuint loadShader(GLenum type, const char* code) {
 
 // --- CALLBACKS ---
 bool environment_cb(unsigned cmd, void *data) {
-    if (cmd == 10) { // SET_PIXEL_FORMAT
-        enum retro_pixel_format { RGB565 = 2 };
-        const enum retro_pixel_format *fmt = (enum retro_pixel_format *)data;
-        if (*fmt == RGB565) return true;
+    switch (cmd) {
+        case 10: // SET_PIXEL_FORMAT
+        {
+            enum retro_pixel_format { RGB565 = 2 };
+            const enum retro_pixel_format *fmt = (enum retro_pixel_format *)data;
+            if (*fmt == RGB565) return true;
+            return false;
+        }
+            // O Core pergunta onde salvar o Memory Card (.mcr)
+        case RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY:
+        {
+            const char** dir = (const char**)data;
+            *dir = g_saveDirectory.c_str();
+            return true;
+        }
+            // O Core pergunta onde salvar configs de sistema (usamos a mesma pasta)
+        case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY:
+        {
+            const char** dir = (const char**)data;
+            *dir = g_saveDirectory.c_str();
+            return true;
+        }
+        default:
+            return false;
     }
-    return false;
 }
 
 void video_refresh_cb(const void *data, unsigned width, unsigned height, size_t pitch) {
@@ -91,6 +113,8 @@ void video_refresh_cb(const void *data, unsigned width, unsigned height, size_t 
     g_coreHeight = height;
     const uint8_t* src = (const uint8_t*)data;
     uint8_t* dst = (uint8_t*)g_pixelBuffer;
+
+    // Copia linha por linha respeitando o pitch
     for(unsigned y = 0; y < height; y++) {
         memcpy(dst, src, width * 2);
         src += pitch;
@@ -130,7 +154,20 @@ int16_t input_state_cb(unsigned port, unsigned device, unsigned index, unsigned 
     return 0;
 }
 
-// --- JNI EXPORTS (RENOMEADOS PARA Ps1Bridge) ---
+// --- JNI EXPORTS ---
+
+// NOVA FUNÇÃO: Define o diretório de saves
+extern "C" JNIEXPORT void JNICALL
+Java_com_example_gamelabs_data_Ps1Bridge_setDirectories(JNIEnv* env, jobject, jstring savePath) {
+    const char *path = env->GetStringUTFChars(savePath, 0);
+    g_saveDirectory = std::string(path);
+    env->ReleaseStringUTFChars(savePath, path);
+
+    // Garante barra no final
+    if (!g_saveDirectory.empty() && g_saveDirectory.back() != '/') {
+        g_saveDirectory += "/";
+    }
+}
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_example_gamelabs_data_Ps1Bridge_loadCore(JNIEnv* env, jobject thiz, jstring corePath) {
@@ -243,4 +280,5 @@ Java_com_example_gamelabs_data_Ps1Bridge_closeCore(JNIEnv* env, jobject) {
     if (g_pixelBuffer) { free(g_pixelBuffer); g_pixelBuffer = nullptr; }
     if (g_bridgeObject) { env->DeleteGlobalRef(g_bridgeObject); g_bridgeObject = nullptr; }
     coreHandle = nullptr;
+    g_saveDirectory = "";
 }
