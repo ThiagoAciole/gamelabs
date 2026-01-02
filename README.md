@@ -5,6 +5,12 @@
 
 **Gamelabs** é um launcher e front-end para **Android** projetado para transformar seu dispositivo móvel em um **console portátil definitivo**. Com foco total na experiência do usuario, ele organiza jogos e aplicativos em uma interface **fluida, rápida e 100% navegável por controles físicos**.
 
+###  🚀 Preview
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/8d5080b3-f9f8-4ca1-880e-a09a6956294f8" width="500" />
+</p>
+
 
 ## ✨ Funcionalidades
 
