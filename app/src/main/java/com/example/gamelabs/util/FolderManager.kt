@@ -78,4 +78,5 @@ object FolderManager {
         Log.d("FolderManager", "Pasta de sistema interna pronta: $systemDir")
         // No futuro, a cópia dos assets do PSP entrará aqui.
     }
+
 }

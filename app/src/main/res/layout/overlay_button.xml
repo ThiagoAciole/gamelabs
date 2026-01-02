@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:padding="4dp">
+
+    <ImageButton
+        android:id="@+id/btn_close_emulator"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:padding="12dp"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
+        android:src="@drawable/ic_close"
+        android:contentDescription="Fechar"
+        android:scaleType="centerInside"
+        android:tint="@color/white"
+        android:elevation="10dp"
+        android:alpha="0.8" />
+</FrameLayout>

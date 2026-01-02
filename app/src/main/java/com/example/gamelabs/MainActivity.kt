@@ -1,6 +1,7 @@
 package com.example.gamelabs
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -14,11 +15,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.example.gamelabs.model.Console
 import com.example.gamelabs.model.Game
-import com.example.gamelabs.screen.Ps1EmulatorScreen
-import com.example.gamelabs.screen.Ps2EmulatorScreen
-import com.example.gamelabs.screen.PspEmulatorScreen
-import com.example.gamelabs.screen.GamesScreen
-import com.example.gamelabs.screen.HomeScreen
+import com.example.gamelabs.screen.* // Importa todas as suas telas
 import com.example.gamelabs.ui.theme.GamelabsTheme
 import com.example.gamelabs.util.FolderManager
 import androidx.core.net.toUri
@@ -27,101 +24,115 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        enableEdgeToEdge()
+        // Garante que o app ocupe a tela toda embaixo das barras de sistema
+        WindowCompat.setDecorFitsSystemWindows(window, false)
 
+        enableEdgeToEdge()
         hideSystemUI()
 
-        checkPermissions()
-        FolderManager.createExternalStructure()
-        FolderManager.deploySystemFiles(this)
+        if (savedInstanceState == null) {
+            checkPermissions()
+            FolderManager.createExternalStructure()
+            FolderManager.deploySystemFiles(this)
+        }
 
         setContent { GamelabsTheme { AppRoot() } }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+
+    }
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) {
-            hideSystemUI()
-        }
+        if (hasFocus) hideSystemUI()
     }
 
     private fun hideSystemUI() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val controller = WindowCompat.getInsetsController(window, window.decorView)
-        controller.let {
-            it.hide(WindowInsetsCompat.Type.systemBars())
-            it.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        }
+        controller.hide(WindowInsetsCompat.Type.systemBars())
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
     }
 
     private fun checkPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (!Environment.isExternalStorageManager()) {
-                try {
-                    val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
-                    intent.addCategory("android.intent.category.DEFAULT")
-                    intent.data = "package:$packageName".toUri()
-                    startActivity(intent)
-                } catch (_: Exception) {
-                    val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-                    startActivity(intent)
+                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                    addCategory("android.intent.category.DEFAULT")
+                    data = "package:$packageName".toUri()
                 }
+                startActivity(intent)
             }
-        } else {
-            requestPermissions(arrayOf(
-                android.Manifest.permission.READ_EXTERNAL_STORAGE,
-                android.Manifest.permission.WRITE_EXTERNAL_STORAGE
-            ), 101)
+        }
+
+        if (!Settings.canDrawOverlays(this)) {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                "package:$packageName".toUri()
+            )
+            startActivity(intent)
         }
     }
 }
 
-private enum class Screen { HOME, GAMES, EMULATOR }
-
+private enum class Screen { HOME, GAMES, EMULATOR, SETTINGS }
 @Composable
 private fun AppRoot() {
     var screen by remember { mutableStateOf(Screen.HOME) }
     var selectedConsole by remember { mutableStateOf(Console.PS1) }
     var selectedGame by remember { mutableStateOf<Game?>(null) }
 
+    // Gerencia o fluxo de telas
     when (screen) {
         Screen.HOME -> HomeScreen(
             onOpenConsole = { console ->
                 selectedConsole = console
                 screen = Screen.GAMES
-            }
+            },
+            onOpenSettings = { screen = Screen.SETTINGS }
         )
 
-        Screen.GAMES -> GamesScreen(
-            console = selectedConsole,
-            onBack = { screen = Screen.HOME },
-            onPlayGame = { game ->
-                selectedGame = game
-                screen = Screen.EMULATOR
+        Screen.GAMES -> {
+            if (selectedConsole == Console.ANDROID) {
+                AndroidGamesScreen(
+                    onBack = { screen = Screen.HOME },
+                    onPlayGame = { game ->
+                        selectedGame = game
+                        screen = Screen.EMULATOR
+                    }
+                )
+            } else {
+                GamesScreen(
+                    console = selectedConsole,
+                    onBack = { screen = Screen.HOME },
+                    onPlayGame = { game ->
+                        selectedGame = game
+                        screen = Screen.EMULATOR
+                    }
+                )
             }
-        )
+        }
 
         Screen.EMULATOR -> {
-            if (selectedGame != null) {
-                when (selectedConsole) {
-                    Console.PS1 -> {
-                        Ps1EmulatorScreen(
-                            game = selectedGame!!,
-                            onClose = { screen = Screen.GAMES }
-                        )
-                    }
-                    Console.PS2 -> {
-                        Ps2EmulatorScreen(
-                            onClose = { screen = Screen.GAMES }
-                        )
-                    }
-                    Console.PSP -> {
-                        PspEmulatorScreen(
-                            onClose = { screen = Screen.GAMES }
-                        )
-                    }
-                }
+            val game = selectedGame ?: return
+
+            // Lógica de fechamento: Sempre volta para a lista de jogos do console atual
+            val closeAction = { screen = Screen.GAMES }
+
+            when (selectedConsole) {
+                Console.PS1 -> Ps1EmulatorScreen(game, onClose = closeAction)
+                Console.PS2 -> Ps2EmulatorScreen(game, onClose = closeAction)
+                Console.PSP -> PspEmulatorScreen(game, onClose = closeAction)
+                Console.ANDROID -> AndroidLauncherScreen(game, onClose = closeAction)
             }
+        }
+        Screen.SETTINGS -> {
+            SettingsScreen(
+                onBack = { screen = Screen.HOME }
+            )
         }
     }
 }
